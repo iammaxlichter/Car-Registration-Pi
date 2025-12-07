@@ -1,5 +1,6 @@
 import time
 import sys
+import platform
 from pathlib import Path
 from dotenv import dotenv_values
 
@@ -9,10 +10,13 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 
 REGISTER_URL = "https://www.register2park.com/register"
 
+CHROME_BINARY_PI = "/usr/bin/chromium"
+CHROMEDRIVER_PATH_PI = "/usr/bin/chromedriver"
 
 # ---------- Helpers ----------
 
@@ -144,6 +148,34 @@ def send_email_confirmation(driver, email: str):
         time.sleep(15)
 
 
+def build_driver() -> webdriver.Chrome:
+    """Create a Chrome/Chromium driver that works on both PC and Raspberry Pi."""
+    machine = platform.machine().lower()
+    print("Detected machine:", machine)  # debug
+
+    options = Options()
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1280,720")
+
+    # Raspberry Pi / ARM
+    if any(arch in machine for arch in ("arm", "aarch64")):
+        options.binary_location = CHROME_BINARY_PI
+        # headless so it works from SSH/cron without a display
+        options.add_argument("--headless=new")  # or "--headless" on older versions
+        return webdriver.Chrome(
+            service=Service(CHROMEDRIVER_PATH_PI),
+            options=options,
+        )
+
+    # Windows / normal PC (uses webdriver-manager)
+    return webdriver.Chrome(
+        service=Service(ChromeDriverManager().install()),
+        options=options,
+    )
+
+
 # ---------- Main ----------
 
 def main(profile: str):
@@ -162,7 +194,7 @@ def main(profile: str):
 
     print(f"=== Running profile: {profile.capitalize()} ===")
 
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
+    driver = build_driver()
     driver.maximize_window()
 
     try:
