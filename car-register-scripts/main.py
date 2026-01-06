@@ -11,7 +11,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
 
 REGISTER_URL = "https://www.register2park.com/register"
 
@@ -24,16 +23,35 @@ def wait_click(driver, selector, by=By.CSS_SELECTOR, timeout=20):
     el = WebDriverWait(driver, timeout).until(
         EC.element_to_be_clickable((by, selector))
     )
-    el.click()
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
+    try:
+        el.click()
+    except WebDriverException:
+        driver.execute_script("arguments[0].click();", el)
     return el
 
 
 def wait_send(driver, selector, text, by=By.CSS_SELECTOR, timeout=20):
+    # clickable > visible to avoid "element not interactable"
     el = WebDriverWait(driver, timeout).until(
-        EC.visibility_of_element_located((by, selector))
+        EC.element_to_be_clickable((by, selector))
     )
-    el.clear()
-    el.send_keys(text)
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
+
+    try:
+        el.click()
+        el.clear()
+        el.send_keys(text)
+    except WebDriverException:
+        # fallback: set value via JS + dispatch events
+        driver.execute_script("arguments[0].value = arguments[1];", el, text)
+        driver.execute_script(
+            "arguments[0].dispatchEvent(new Event('input', {bubbles:true}));", el
+        )
+        driver.execute_script(
+            "arguments[0].dispatchEvent(new Event('change', {bubbles:true}));", el
+        )
+
     return el
 
 
@@ -93,7 +111,6 @@ def fill_vehicle_info(driver, make: str, model: str, plate: str):
         print(f"✔ Vehicle info: {make} {model} {plate} (clicked Next)")
     except TimeoutException as e:
         print("⚠ Could not find the Next button (#vehicleInformationVIP):", e)
-        # keep browser open so you can see where it died
         time.sleep(15)
         raise
 
@@ -110,7 +127,6 @@ def send_email_confirmation(driver, email: str):
         )
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
 
-        # Try JS click first, then normal click as backup
         try:
             driver.execute_script("arguments[0].click();", btn)
         except WebDriverException:
@@ -123,7 +139,6 @@ def send_email_confirmation(driver, email: str):
         time.sleep(15)
         return
 
-    # Now the modal should be visible
     try:
         print("⏳ Waiting for email confirmation modal...")
         modal = WebDriverWait(driver, 20).until(
@@ -151,7 +166,7 @@ def send_email_confirmation(driver, email: str):
 def build_driver() -> webdriver.Chrome:
     """Create a Chrome/Chromium driver that works on both PC and Raspberry Pi."""
     machine = platform.machine().lower()
-    print("Detected machine:", machine)  # debug
+    print("Detected machine:", machine)
 
     options = Options()
     options.add_argument("--no-sandbox")
@@ -162,14 +177,15 @@ def build_driver() -> webdriver.Chrome:
     # Raspberry Pi / ARM
     if any(arch in machine for arch in ("arm", "aarch64")):
         options.binary_location = CHROME_BINARY_PI
-        # headless so it works from SSH/cron without a display
-        options.add_argument("--headless=new")  # or "--headless" on older versions
+        options.add_argument("--headless=new")  # or "--headless" if needed
         return webdriver.Chrome(
             service=Service(CHROMEDRIVER_PATH_PI),
             options=options,
         )
 
     # Windows / normal PC (uses webdriver-manager)
+    from webdriver_manager.chrome import ChromeDriverManager
+
     return webdriver.Chrome(
         service=Service(ChromeDriverManager().install()),
         options=options,
@@ -209,7 +225,6 @@ def main(profile: str):
         fill_vehicle_info(driver, MAKE, MODEL, PLATE)
         send_email_confirmation(driver, EMAIL)
 
-        # give time to see final state
         time.sleep(5)
 
     finally:
