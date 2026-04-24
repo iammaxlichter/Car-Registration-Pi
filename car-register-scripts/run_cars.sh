@@ -23,6 +23,13 @@ mkdir -p "$LOG_DIR"
   sleep 15
 
   python main.py tatiana_odyssey
+  sleep 15
+
+  python main.py tatiana_tesla
+  sleep 15
+
+  python main.py austin
+  
 
   echo "Run finished: $(date)"
   echo
